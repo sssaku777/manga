@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>漫画管理 PWA</title>
+    <meta name="theme-color" content="#0ea5e9" />
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.webmanifest">
+
+    <!-- Icons -->
+    <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
+    <link rel="apple-touch-icon" href="/icons/icon-180.png" sizes="180x180">
+
+    <!-- iOS PWA meta -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="漫画管理">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <!-- libs -->
+    <script defer src="https://cdn.jsdelivr.net/npm/idb-keyval@6/dist/idb-keyval.iife.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+      :root { --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom); }
+      body { padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
+      .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+      /* 100vh bug workaround on iOS */
+      :root { --vh: 1vh; }
+      .vh-full { height: calc(var(--vh) * 100); }
+    </style>
+  </head>
+  <body class="bg-slate-50 text-slate-900">
+    <script>
+      // iOS 100vh fix
+      function setVh() { document.documentElement.style.setProperty('--vh', (window.innerHeight * 0.01) + 'px'); }
+      window.addEventListener('resize', setVh); setVh();
+    </script>
+
+    <header class="sticky top-0 z-50 bg-white/80 backdrop-blur border-b border-slate-200">
+      <div class="max-w-5xl mx-auto px-4 py-3 flex items-center gap-2">
+        <h1 class="text-xl font-bold flex-1">📚 漫画管理</h1>
+        <button id="installBtn" class="hidden px-3 py-1.5 rounded-xl shadow text-sm border hover:bg-slate-50">インストール</button>
+        <button id="exportBtn" class="px-3 py-1.5 rounded-xl shadow text-sm border hover:bg-slate-50">エクスポート</button>
+        <label class="px-3 py-1.5 rounded-xl shadow text-sm border hover:bg-slate-50 cursor-pointer">
+          インポート
+          <input id="importInput" type="file" accept="application/json" class="hidden">
+        </label>
+      </div>
+      <div class="max-w-5xl mx-auto px-4 pb-3">
+        <div class="flex gap-2 flex-wrap">
+          <input id="search" type="search" placeholder="タイトル / 作者 検索" class="flex-1 min-w-[180px] border rounded-xl px-3 py-2">
+          <select id="statusFilter" class="border rounded-xl px-3 py-2">
+            <option value="">すべての状態</option>
+            <option value="reading">読書中</option>
+            <option value="completed">読了</option>
+            <option value="onhold">中断中</option>
+            <option value="wishlist">欲しい</option>
+          </select>
+          <select id="sortBy" class="border rounded-xl px-3 py-2">
+            <option value="updatedAt_desc">更新が新しい</option>
+            <option value="title_asc">タイトル (A→Z)</option>
+            <option value="author_asc">作者 (A→Z)</option>
+            <option value="volumes_desc">巻数 (多→少)</option>
+          </select>
+          <button id="addBtn" class="ml-auto px-3 py-2 rounded-2xl bg-sky-500 text-white shadow hover:bg-sky-600">＋ 追加</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-4 py-4">
+      <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3"></div>
+      <p id="emptyState" class="hidden text-center text-slate-500 mt-10">まだ登録がありません。「＋ 追加」から登録してください。</p>
+    </main>
+
+    <!-- Drawer -->
+    <dialog id="drawer" class="backdrop:bg-black/40 rounded-none w-full max-w-xl md:rounded-2xl md:mx-auto">
+      <form method="dialog" class="p-0 m-0">
+        <div class="p-4 border-b flex items-center gap-2">
+          <h2 id="drawerTitle" class="text-lg font-semibold flex-1">漫画を追加</h2>
+          <button id="deleteBtn" type="button" class="hidden text-sm text-rose-600 px-2 py-1 rounded-lg border border-rose-200 hover:bg-rose-50">削除</button>
+          <button id="closeBtn" class="text-slate-600 px-3 py-1.5 rounded-xl border hover:bg-slate-50">閉じる</button>
+        </div>
+        <div class="p-4 space-y-3">
+          <div class="flex gap-3">
+            <img id="coverPreview" src="" alt="表紙" class="w-24 h-32 object-cover rounded-lg border bg-slate-100">
+            <div class="flex-1 grid grid-cols-2 gap-3">
+              <div class="col-span-2">
+                <label class="block text-sm text-slate-600 mb-1">タイトル</label>
+                <input id="title" required class="w-full border rounded-xl px-3 py-2">
+              </div>
+              <div class="col-span-2">
+                <label class="block text-sm text-slate-600 mb-1">作者</label>
+                <input id="author" class="w-full border rounded-xl px-3 py-2">
+              </div>
+              <div>
+                <label class="block text-sm text-slate-600 mb-1">総巻数</label>
+                <input id="totalVolumes" type="number" min="0" class="w-full border rounded-xl px-3 py-2">
+              </div>
+              <div>
+                <label class="block text-sm text-slate-600 mb-1">所持巻数</label>
+                <input id="ownedVolumes" type="number" min="0" class="w-full border rounded-xl px-3 py-2">
+              </div>
+              <div>
+                <label class="block text-sm text-slate-600 mb-1">状態</label>
+                <select id="status" class="w-full border rounded-xl px-3 py-2">
+                  <option value="reading">読書中</option>
+                  <option value="completed">読了</option>
+                  <option value="onhold">中断中</option>
+                  <option value="wishlist">欲しい</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm text-slate-600 mb-1">タグ (カンマ区切り)</label>
+                <input id="tags" class="w-full border rounded-xl px-3 py-2" placeholder="SF, グルメ, スポーツ">
+              </div>
+              <div class="col-span-2">
+                <label class="block text-sm text-slate-600 mb-1">メモ</label>
+                <textarea id="notes" rows="3" class="w-full border rounded-xl px-3 py-2"></textarea>
+              </div>
+              <div class="col-span-2">
+                <label class="block text-sm text-slate-600 mb-1">表紙画像</label>
+                <input id="coverFile" type="file" accept="image/*" class="w-full">
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="p-4 border-t flex items-center gap-2">
+          <button id="saveBtn" class="ml-auto px-4 py-2 rounded-2xl bg-sky-600 text-white shadow hover:bg-sky-700">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <template id="cardTpl">
+      <div class="group bg-white rounded-2xl border shadow-sm hover:shadow transition overflow-hidden">
+        <div class="aspect-[3/4] bg-slate-100">
+          <img class="cover w-full h-full object-cover" alt="表紙">
+        </div>
+        <div class="p-3">
+          <h3 class="title font-semibold text-sm line-clamp-2"></h3>
+          <p class="author text-xs text-slate-500 mt-1"></p>
+          <div class="mt-2 flex items-center justify-between text-xs text-slate-600">
+            <span class="volumes"></span>
+            <span class="status px-2 py-0.5 rounded-full border"></span>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <script src="/app.js" defer></script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("/sw.js").catch(console.error);
+        });
+      }
+    </script>
+  </body>
+</html>
